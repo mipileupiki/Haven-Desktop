@@ -1,0 +1,9 @@
+node_modules/
+dist/
+native/build/
+*.node
+.env
+.DS_Store
+Thumbs.db
+out/
+*.log

@@ -1,0 +1,29 @@
+{
+  "name": "haven-desktop",
+  "version": "1.0.0-beta.1",
+  "description": "Haven Desktop — Private chat, reimagined for your desktop",
+  "main": "src/main/main.js",
+  "author": "Haven Contributors",
+  "license": "MIT-NC",
+  "homepage": "https://havenchat.io",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "build": "npm run build:native && electron-builder",
+    "build:win": "npm run build:native && electron-builder --win",
+    "build:linux": "npm run build:native && electron-builder --linux",
+    "build:native": "node ./node_modules/node-gyp/bin/node-gyp.js rebuild --directory=native",
+    "rebuild:electron": "node ./node_modules/@electron/rebuild/lib/cli.js && npm run build:native",
+    "postinstall": "node ./node_modules/@electron/rebuild/lib/cli.js || echo electron-rebuild skipped"
+  },
+  "dependencies": {
+    "electron-store": "^8.2.0",
+    "node-addon-api": "^8.3.0"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "@electron/rebuild": "^3.7.1",
+    "node-gyp": "^10.3.1"
+  }
+}

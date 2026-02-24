@@ -1,0 +1,48 @@
+appId: com.haven.desktop
+productName: Haven
+copyright: Copyright © 2024-2026 Haven
+
+directories:
+  output: dist
+  buildResources: assets
+
+files:
+  - "src/**/*"
+  - "native/build/Release/*.node"
+  - "node_modules/**/*"
+  - "!node_modules/**/build/Release/obj*"
+  - "package.json"
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: assets/icon.svg
+
+nsis:
+  oneClick: true
+  perMachine: false
+  allowToChangeInstallationDirectory: false
+  runAfterFinish: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Haven
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+  icon: assets/icon.svg
+  category: Network;Chat;InstantMessaging
+  desktop:
+    Name: Haven
+    Comment: Private self-hosted chat
+    Terminal: false
+
+extraResources:
+  - from: native/build/Release/
+    to: native/
+    filter:
+      - "*.node"

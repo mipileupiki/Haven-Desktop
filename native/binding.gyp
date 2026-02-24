@@ -1,0 +1,45 @@
+{
+  "targets": [
+    {
+      "target_name": "haven_audio",
+      "cflags!":    ["-fno-exceptions"],
+      "cflags_cc!": ["-fno-exceptions"],
+      "sources":    ["src/addon.cpp"],
+      "include_dirs": [
+        "<!@(node -p \"require('node-addon-api').include\")"
+      ],
+      "defines": ["NAPI_DISABLE_CPP_EXCEPTIONS"],
+      "conditions": [
+        ["OS=='win'", {
+          "sources": ["src/win/wasapi_capture.cpp"],
+          "libraries": [
+            "-lole32.lib",
+            "-lmmdevapi.lib",
+            "-luuid.lib",
+            "-lAvrt.lib",
+            "-lPsapi.lib"
+          ],
+          "msvs_settings": {
+            "VCCLCompilerTool": {
+              "ExceptionHandling": 1,
+              "AdditionalOptions": ["/std:c++17"]
+            }
+          },
+          "defines": ["PLATFORM_WINDOWS"]
+        }],
+        ["OS=='linux'", {
+          "sources": ["src/linux/pulse_capture.cpp"],
+          "cflags_cc": [
+            "<!@(pkg-config --cflags libpulse 2>/dev/null || echo '')",
+            "-std=c++17",
+            "-fexceptions"
+          ],
+          "libraries": [
+            "<!@(pkg-config --libs libpulse 2>/dev/null || echo '-lpulse')"
+          ],
+          "defines": ["PLATFORM_LINUX"]
+        }]
+      ]
+    }
+  ]
+}
