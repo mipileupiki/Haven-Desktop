@@ -92,24 +92,31 @@ struct SinkInputInfo {
     std::string name;
 };
 
+// File-scope struct used by the sink-input enumeration callback.
+// Replaces an old trick of manual pointer arithmetic to reach the
+// "done" flag — that relied on the compiler placing no padding after
+// the vector, which is UB-adjacent and crashed on some PipeWire hosts.
+struct SinkInputEnumData {
+    std::vector<SinkInputInfo> inputs;
+    bool done = false;
+};
+
 static void sinkInputCb(pa_context*, const pa_sink_input_info* info, int eol, void* ud) {
-    if (eol > 0 || !info) { *(bool*)((char*)ud + sizeof(std::vector<SinkInputInfo>)) = true; return; }
-    auto* vec = (std::vector<SinkInputInfo>*)ud;
+    auto* data = static_cast<SinkInputEnumData*>(ud);
+    if (eol > 0 || !info) { data->done = true; return; }
 
     SinkInputInfo si;
     si.index     = info->index;
     si.sinkIndex = info->sink;
     si.name      = info->name ? info->name : "Unknown";
 
-    // Get PID from proplist
     const char* pidStr = pa_proplist_gets(info->proplist, PA_PROP_APPLICATION_PROCESS_ID);
     si.pid = pidStr ? (uint32_t)atoi(pidStr) : 0;
 
-    // If name is generic, try to get a better one
     const char* appName = pa_proplist_gets(info->proplist, PA_PROP_APPLICATION_NAME);
     if (appName && strlen(appName) > 0) si.name = appName;
 
-    vec->push_back(si);
+    data->inputs.push_back(si);
 }
 
 // Module load callback
@@ -153,10 +160,7 @@ std::vector<AudioApp> PulseCapture::GetAudioApplications() {
     if (!pa.connect()) return result;
 
     // Enumerate sink inputs
-    struct EnumData {
-        std::vector<SinkInputInfo> inputs;
-        bool done = false;
-    } ed;
+    SinkInputEnumData ed;
 
     pa_operation* op = pa_context_get_sink_input_info_list(pa.ctx, sinkInputCb, &ed);
     if (!op) return result;
@@ -225,10 +229,7 @@ void PulseCapture::captureLoop() {
     if (!pa.connect()) { m_running = false; return; }
 
     // ── Step 1: Find the target process's sink input ──────
-    struct EnumData {
-        std::vector<SinkInputInfo> inputs;
-        bool done = false;
-    } ed;
+    SinkInputEnumData ed;
 
     pa_operation* op = pa_context_get_sink_input_info_list(pa.ctx, sinkInputCb, &ed);
     if (!op) { m_running = false; return; }
@@ -311,6 +312,10 @@ void PulseCapture::captureLoop() {
     }
 
     // ── Step 5: Record from the null sink's monitor ───────
+    // Small delay lets PipeWire (pipewire-pulse) finish creating the
+    // monitor source after module-null-sink was loaded.
+    usleep(100000); // 100 ms
+
     pa_sample_spec ss;
     ss.format   = PA_SAMPLE_FLOAT32LE;
     ss.rate     = 48000;
@@ -324,6 +329,26 @@ void PulseCapture::captureLoop() {
     );
 
     if (!rec) {
+        fprintf(stderr, "[Haven AudioCapture] pa_simple_new failed: %s\n", pa_strerror(err));
+        // Clean up modules before returning
+        if (m_loopbackModule != 0) {
+            OpDone od;
+            auto* unOp = pa_context_unload_module(pa.ctx, m_loopbackModule, successCb, &od);
+            if (unOp) { while (!od.done) pa.iterateBlock(); pa_operation_unref(unOp); }
+            m_loopbackModule = 0;
+        }
+        if (m_nullSinkModule != 0) {
+            OpDone od;
+            auto* unOp = pa_context_unload_module(pa.ctx, m_nullSinkModule, successCb, &od);
+            if (unOp) { while (!od.done) pa.iterateBlock(); pa_operation_unref(unOp); }
+            m_nullSinkModule = 0;
+        }
+        // Restore original sink
+        if (originalSink != PA_INVALID_INDEX) {
+            OpDone od;
+            auto* mvOp = pa_context_move_sink_input_by_index(pa.ctx, targetSinkInput, originalSink, successCb, &od);
+            if (mvOp) { while (!od.done) pa.iterateBlock(); pa_operation_unref(mvOp); }
+        }
         m_running = false;
         return;
     }

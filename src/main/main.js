@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════
 
 const {
-  app, BrowserWindow, ipcMain, Notification, Tray, Menu,
+  app, BrowserWindow, BrowserView, ipcMain, Notification, Tray, Menu,
   nativeImage, desktopCapturer, session, dialog, shell
 } = require('electron');
 const path  = require('path');
@@ -14,7 +14,8 @@ const { AudioCaptureManager } = require('./audio-capture');
 
 // ── Constants ─────────────────────────────────────────────
 const IS_DEV    = process.argv.includes('--dev');
-const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.svg');
+const SHOW_SERVER = process.argv.includes('--show-server');
+const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
 
 // ── Persistent Store ──────────────────────────────────────
 const store = new Store({
@@ -32,11 +33,14 @@ const store = new Store({
 });
 
 // ── State ─────────────────────────────────────────────────
-let mainWindow    = null;
-let welcomeWindow = null;
-let tray          = null;
-let serverManager = null;
-let audioCapture  = null;
+let mainWindow      = null;
+let welcomeWindow   = null;
+let tray            = null;
+let serverManager   = null;
+let audioCapture    = null;
+let serverViews     = new Map();  // serverUrl → BrowserView
+let activeServerUrl = null;
+let badgeIcon       = null;
 
 // ── Single-Instance Lock ──────────────────────────────────
 const gotLock = app.requestSingleInstanceLock();
@@ -73,13 +77,14 @@ app.on('certificate-error', (event, webContents, url, error, certificate, callba
 // ═══════════════════════════════════════════════════════════
 
 app.whenReady().then(async () => {
-  serverManager = new ServerManager(store);
+  serverManager = new ServerManager(store, { showConsole: SHOW_SERVER || IS_DEV });
   audioCapture  = new AudioCaptureManager();
+  badgeIcon     = createBadgeIcon();
 
   // Forward server log lines to whichever renderer window is active
   serverManager.onLog((msg) => {
-    const win = welcomeWindow || mainWindow;
-    if (win && !win.isDestroyed()) win.webContents.send('server:log', msg);
+    const wc = getActiveContents() || welcomeWindow?.webContents;
+    if (wc && !wc.isDestroyed()) wc.send('server:log', msg);
   });
 
   registerIPC();
@@ -92,6 +97,7 @@ app.whenReady().then(async () => {
     if (prefs.mode === 'host' && prefs.serverPath) {
       const res = await serverManager.startServer(prefs.serverPath);
       if (!res.success) { createWelcomeWindow(); createTray(); return; }
+      console.log(`[Haven Desktop] Server started at ${res.url} (port ${res.port})`);
       // Use the fresh URL (protocol may have changed between http/https)
       createAppWindow(res.url || prefs.serverUrl);
     } else {
@@ -104,7 +110,10 @@ app.whenReady().then(async () => {
   createTray();
 });
 
-app.on('window-all-closed', () => { /* keep alive for tray */ });
+app.on('window-all-closed', () => {
+  // Quit the app when all windows are closed
+  app.quit();
+});
 
 app.on('before-quit', () => {
   serverManager?.stopServer();
@@ -141,49 +150,122 @@ function createWelcomeWindow() {
 }
 
 function createAppWindow(serverUrl) {
-  const bounds = store.get('windowBounds');
+  if (!mainWindow) {
+    const bounds = store.get('windowBounds');
+    mainWindow = new BrowserWindow({
+      ...bounds,
+      minWidth: 800, minHeight: 600,
+      frame: true,
+      backgroundColor: '#0d0d1a',
+      icon: ICON_PATH,
+      show: false,
+    });
 
-  mainWindow = new BrowserWindow({
-    ...bounds,
-    minWidth: 800, minHeight: 600,
-    frame: true,
-    backgroundColor: '#0d0d1a',
-    icon: ICON_PATH,
-    webPreferences: {
-      preload: path.join(__dirname, 'app-preload.js'),
-      contextIsolation: false,
-      nodeIntegration: false,
-      sandbox: false,
-      webSecurity: true,
-    },
-    show: false,
-  });
+    const saveBounds = () => {
+      if (!mainWindow) return;
+      const b = mainWindow.getBounds();
+      store.set('windowBounds', { width: b.width, height: b.height });
+    };
+    mainWindow.on('resize', saveBounds);
+    mainWindow.on('move',   saveBounds);
+    mainWindow.on('focus',  clearNotificationBadge);
+    mainWindow.on('closed', () => {
+      serverViews.clear();
+      activeServerUrl = null;
+      mainWindow = null;
+    });
+  }
 
-  // Load Haven web app
-  const url = serverUrl.replace(/\/+$/, '') + '/app.html';
-  mainWindow.loadURL(url);
+  switchToServer(serverUrl);
 
-  mainWindow.once('ready-to-show', () => {
+  if (!mainWindow.isVisible()) {
     mainWindow.show();
     if (welcomeWindow) welcomeWindow.close();
-    if (IS_DEV) mainWindow.webContents.openDevTools({ mode: 'detach' });
-  });
+  }
+}
 
-  // Persist window size
-  const saveBounds = () => {
-    if (!mainWindow) return;
-    const b = mainWindow.getBounds();
-    store.set('windowBounds', { width: b.width, height: b.height });
-  };
-  mainWindow.on('resize', saveBounds);
-  mainWindow.on('move',   saveBounds);
+// ── Multi-Server View Management ────────────────────────────
 
-  // Minimize-to-tray on close
-  mainWindow.on('close', (e) => {
-    if (tray && !app.isQuitting) { e.preventDefault(); mainWindow.hide(); }
-  });
+function switchToServer(serverUrl) {
+  const url = serverUrl.replace(/\/+$/, '');
+  if (!mainWindow) return;
 
-  mainWindow.on('closed', () => { mainWindow = null; });
+  let view = serverViews.get(url);
+  if (!view) {
+    view = new BrowserView({
+      webPreferences: {
+        preload: path.join(__dirname, 'app-preload.js'),
+        contextIsolation: false,
+        nodeIntegration: false,
+        sandbox: false,
+        webSecurity: true,
+      },
+    });
+    mainWindow.addBrowserView(view);
+    const [w, h] = mainWindow.getContentSize();
+    view.setBounds({ x: 0, y: 0, width: w, height: h });
+    view.setAutoResize({ width: true, height: true });
+
+    view.webContents.loadURL(url + '/app.html');
+
+    // Intercept window.open → switch servers or open external
+    view.webContents.setWindowOpenHandler(({ url: openUrl }) => {
+      handleWindowOpen(openUrl);
+      return { action: 'deny' };
+    });
+
+    if (IS_DEV) view.webContents.openDevTools({ mode: 'detach' });
+    serverViews.set(url, view);
+  }
+
+  mainWindow.setTopBrowserView(view);
+  activeServerUrl = url;
+}
+
+function handleWindowOpen(url) {
+  try {
+    const parsed = new URL(url);
+    if (/^https?:$/.test(parsed.protocol)) {
+      switchToServer(parsed.origin);
+      return;
+    }
+  } catch { /* not a URL */ }
+  if (typeof url === 'string' && /^https?:\/\//i.test(url)) shell.openExternal(url);
+}
+
+function getActiveContents() {
+  if (activeServerUrl && serverViews.has(activeServerUrl))
+    return serverViews.get(activeServerUrl).webContents;
+  return mainWindow?.webContents || welcomeWindow?.webContents || null;
+}
+
+// ── Notification Badge ───────────────────────────────────────
+
+function createBadgeIcon() {
+  const s = 16, buf = Buffer.alloc(s * s * 4, 0);
+  for (let y = 0; y < s; y++) {
+    for (let x = 0; x < s; x++) {
+      const dx = x - s / 2, dy = y - s / 2;
+      if (Math.sqrt(dx * dx + dy * dy) < s / 2 - 0.5) {
+        const i = (y * s + x) * 4;
+        // Haven purple #6b4fdb
+        buf[i] = 107; buf[i + 1] = 79; buf[i + 2] = 219; buf[i + 3] = 255;
+      }
+    }
+  }
+  return nativeImage.createFromBuffer(buf, { width: s, height: s });
+}
+
+function setNotificationBadge() {
+  if (!mainWindow) return;
+  if (process.platform === 'win32' && badgeIcon) mainWindow.setOverlayIcon(badgeIcon, 'New messages');
+  mainWindow.flashFrame(true);
+}
+
+function clearNotificationBadge() {
+  if (!mainWindow) return;
+  if (process.platform === 'win32') mainWindow.setOverlayIcon(null, '');
+  mainWindow.flashFrame(false);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -255,11 +337,11 @@ function registerScreenShareHandler() {
         display_id: s.display_id,
       }));
 
-      const targetWin = mainWindow;
-      if (!targetWin) { callback({}); return; }
+      const targetContents = getActiveContents();
+      if (!targetContents) { callback({}); return; }
 
       // Ask renderer to show the picker
-      targetWin.webContents.send('screen:show-picker', { sources: sourceData, audioApps });
+      targetContents.send('screen:show-picker', { sources: sourceData, audioApps });
 
       // Wait for picker result (or 60 s timeout)
       const result = await new Promise(resolve => {
@@ -274,20 +356,28 @@ function registerScreenShareHandler() {
       if (!selected) { callback({}); return; }
 
       // Start per-app audio capture when a specific app was chosen
+      let usePerAppAudio = false;
       if (result.audioAppPid && result.audioAppPid > 0) {
         try {
           audioCapture.startCapture(result.audioAppPid, (pcmData) => {
-            if (targetWin && !targetWin.isDestroyed()) {
-              targetWin.webContents.send('audio:capture-data', pcmData);
+            if (targetContents && !targetContents.isDestroyed()) {
+              targetContents.send('audio:capture-data', pcmData);
             }
           });
+          usePerAppAudio = true;
         } catch (err) {
           console.error('[ScreenShare] per-app audio start failed:', err.message);
         }
       }
 
-      // Hand Electron the selected video source (+system loopback as fallback audio)
-      callback({ video: selected, audio: 'loopback' });
+      // When per-app audio is active, do NOT pass system loopback —
+      // the per-app track from the native addon is the only audio source.
+      // This prevents all system audio from leaking through.
+      if (usePerAppAudio) {
+        callback({ video: selected });
+      } else {
+        callback({ video: selected, audio: 'loopback' });
+      }
 
     } catch (err) {
       console.error('[ScreenShare] handler error:', err);
@@ -328,25 +418,26 @@ function registerIPC() {
   // ── Audio Capture ─────────────────────────────────────
   ipcMain.handle('audio:get-apps',      () => { try { return audioCapture.getAudioApplications(); } catch { return []; } });
   ipcMain.handle('audio:start-capture',  (_e, pid) => audioCapture.startCapture(pid, pcm => {
-    mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.send('audio:capture-data', pcm);
+    const wc = getActiveContents();
+    if (wc && !wc.isDestroyed()) wc.send('audio:capture-data', pcm);
   }));
   ipcMain.handle('audio:stop-capture',   () => audioCapture.stopCapture());
   ipcMain.handle('audio:is-supported',   () => audioCapture.isSupported());
 
   // ── Audio Devices ─────────────────────────────────────
   ipcMain.handle('devices:get-inputs', async () => {
-    const win = mainWindow || welcomeWindow;
-    if (!win) return [];
-    return win.webContents.executeJavaScript(`
+    const wc = getActiveContents();
+    if (!wc) return [];
+    return wc.executeJavaScript(`
       navigator.mediaDevices.enumerateDevices()
         .then(d => d.filter(x => x.kind==='audioinput').map(x => ({ deviceId:x.deviceId, label:x.label||'Mic '+x.deviceId.slice(0,8), groupId:x.groupId })))
     `);
   });
 
   ipcMain.handle('devices:get-outputs', async () => {
-    const win = mainWindow || welcomeWindow;
-    if (!win) return [];
-    return win.webContents.executeJavaScript(`
+    const wc = getActiveContents();
+    if (!wc) return [];
+    return wc.executeJavaScript(`
       navigator.mediaDevices.enumerateDevices()
         .then(d => d.filter(x => x.kind==='audiooutput').map(x => ({ deviceId:x.deviceId, label:x.label||'Speaker '+x.deviceId.slice(0,8), groupId:x.groupId })))
     `);
@@ -362,6 +453,9 @@ function registerIPC() {
     });
     n.show();
     n.on('click', () => { mainWindow?.show(); mainWindow?.focus(); });
+
+    // Taskbar notification badge when window is not focused
+    if (mainWindow && !mainWindow.isFocused()) setNotificationBadge();
     return true;
   });
 

@@ -1,9 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <defs>
-    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#1a1a2e"/>
-      <stop offset="100%" style="stop-color:#0d0d1a"/>
-    </linearGradient>
     <linearGradient id="hex" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" style="stop-color:#8b6ff0"/>
       <stop offset="100%" style="stop-color:#6b4fdb"/>
@@ -16,14 +12,12 @@
       </feMerge>
     </filter>
   </defs>
-  <!-- Background circle -->
-  <circle cx="256" cy="256" r="250" fill="url(#bg)"/>
   <!-- Hexagon -->
-  <polygon points="256,56 430,156 430,356 256,456 82,356 82,156"
+  <polygon points="256,36 450,148 450,364 256,476 62,364 62,148"
     fill="none" stroke="url(#hex)" stroke-width="28" stroke-linejoin="round"
     filter="url(#glow)"/>
-  <!-- H lettermark -->
-  <text x="256" y="290" text-anchor="middle"
-    font-family="Arial,Helvetica,sans-serif" font-weight="bold" font-size="180"
+  <!-- H lettermark — vertically centered using dominant-baseline -->
+  <text x="256" y="256" text-anchor="middle" dominant-baseline="central"
+    font-family="Arial,Helvetica,sans-serif" font-weight="bold" font-size="200"
     fill="url(#hex)" opacity=".95">H</text>
 </svg>

@@ -10,11 +10,12 @@ const fs   = require('fs');
 const net  = require('net');
 
 class ServerManager {
-  constructor(store) {
+  constructor(store, opts = {}) {
     this.store         = store;
     this.serverProcess = null;
     this._running      = false;
     this._port         = null;
+    this._showConsole  = opts.showConsole || false;
   }
 
   // ── Detect a Haven server in common locations ────────────
@@ -72,13 +73,23 @@ class ServerManager {
       // Use system `node` (Electron's binary is not plain Node)
       const nodeCmd = process.platform === 'win32' ? 'node.exe' : 'node';
 
-      this.serverProcess = spawn(nodeCmd, [sjs], {
+      const spawnOpts = {
         cwd: serverDir,
         env,
-        stdio: ['pipe', 'pipe', 'pipe'],
         shell: false,
-        windowsHide: true,
-      });
+      };
+
+      if (this._showConsole) {
+        // Show server in its own visible console window
+        spawnOpts.detached = true;
+        spawnOpts.windowsHide = false;
+        spawnOpts.stdio = ['pipe', 'pipe', 'pipe'];
+        this.serverProcess = spawn(nodeCmd, [sjs], spawnOpts);
+      } else {
+        spawnOpts.stdio = ['pipe', 'pipe', 'pipe'];
+        spawnOpts.windowsHide = true;
+        this.serverProcess = spawn(nodeCmd, [sjs], spawnOpts);
+      }
 
       let resolved  = false;
       let isHTTPS   = false;   // detect from server output

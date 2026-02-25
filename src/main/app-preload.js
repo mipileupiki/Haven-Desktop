@@ -17,8 +17,10 @@ const { ipcRenderer } = require('electron');
 let _audioWorkletNode    = null;
 let _audioCtx            = null;
 let _audioDestination    = null;
-let _audioBufferQueue    = [];
-let _capturedAudioPid    = null;
+// ─── Forward server log messages to the browser console ──
+ipcRenderer.on('server:log', (_event, msg) => {
+  console.log('[Haven Server]', msg.trimEnd());
+});
 
 // ─── Receive PCM chunks from native addon (main process) ─
 ipcRenderer.on('audio:capture-data', (_event, pcmData) => {
@@ -169,14 +171,18 @@ function showScreenPicker(sources, audioApps) {
   }
 
   // ── Cancel ─────────────────────────────────────────────
-  const dismiss = (cancelled) => {
+  const dismiss = async (cancelled) => {
     overlay.remove();
     document.removeEventListener('keydown', escHandler);
-    ipcRenderer.send('screen:picker-result', cancelled ? { cancelled: true } : { sourceId: selSource, audioAppPid: selAudioPid });
+
     if (!cancelled && selAudioPid) {
       _capturedAudioPid = selAudioPid;
-      buildAudioPipeline();
+      // Build the audio pipeline BEFORE sending the picker result,
+      // so the per-app track is ready when getDisplayMedia resolves.
+      await buildAudioPipeline();
     }
+
+    ipcRenderer.send('screen:picker-result', cancelled ? { cancelled: true } : { sourceId: selSource, audioAppPid: selAudioPid });
   };
 
   document.getElementById('hsp-cancel').onclick = () => dismiss(true);
@@ -306,11 +312,13 @@ function installGetDisplayMediaOverride() {
   navigator.mediaDevices.getDisplayMedia = async function (constraints) {
     const stream = await _origGDM(constraints);
 
-    // Replace audio track with our per-app capture if active
+    // If per-app audio capture is active, add our native capture track
+    // (system loopback is already excluded by the main process handler)
     if (window._havenAppAudioTrack) {
+      // Remove any existing audio tracks (shouldn't be any, but just in case)
       stream.getAudioTracks().forEach(t => { stream.removeTrack(t); t.stop(); });
       stream.addTrack(window._havenAppAudioTrack);
-      console.log('[Haven Desktop] Swapped system audio → per-app audio');
+      console.log('[Haven Desktop] Added per-app audio track to screen share');
     }
 
     // Auto-teardown when the video track ends (user stops sharing)
