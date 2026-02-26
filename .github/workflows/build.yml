@@ -27,8 +27,10 @@ jobs:
       - name: Build native audio addon
         run: npm run build:native
 
-      - name: Build Windows installer
-        run: npx electron-builder --win --publish never
+      - name: Build & Publish Windows installer
+        run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
@@ -40,6 +42,7 @@ jobs:
 
   # ─── Linux Build ────────────────────────────────────────
   build-linux:
+    needs: [build-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -58,8 +61,10 @@ jobs:
       - name: Build native audio addon
         run: npm run build:native
 
-      - name: Build Linux packages
-        run: npx electron-builder --linux --publish never
+      - name: Build & Publish Linux packages
+        run: npx electron-builder --linux --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v4
@@ -69,26 +74,3 @@ jobs:
             dist/*.AppImage
             dist/*.deb
           retention-days: 30
-
-  # ─── Create GitHub Release ──────────────────────────────
-  release:
-    needs: [build-windows, build-linux]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          name: Haven Desktop ${{ github.ref_name }}
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          files: |
-            artifacts/haven-desktop-windows/*.exe
-            artifacts/haven-desktop-linux/*.AppImage
-            artifacts/haven-desktop-linux/*.deb

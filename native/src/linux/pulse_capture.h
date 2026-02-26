@@ -8,6 +8,11 @@
 //   4) Also connecting the null sink back to the real output
 //      so the user still hears the application
 //
+// PipeWire-safe mode (auto-detected):
+//   Uses module-combine-sink instead of directly moving sink
+//   inputs, avoiding the destabilizing stream disconnection
+//   that crashes Chromium-based apps on PipeWire hosts.
+//
 // Works on PulseAudio and PipeWire (via pipewire-pulse compat)
 // ═══════════════════════════════════════════════════════════
 #pragma once

@@ -253,7 +253,25 @@ void PulseCapture::captureLoop() {
         return;
     }
 
-    // ── Step 2: Create a null sink ────────────────────────
+    // ── Detect PipeWire ───────────────────────────────────
+    // PipeWire's pipewire-pulse adds "pipewire" to server info.
+    // On PipeWire, moving a sink input can crash Chromium-based
+    // apps, so we use module-combine-sink instead (keeps the
+    // original output alive while teeing audio to our capture).
+    struct ServerInfo { std::string name; bool done = false; };
+    ServerInfo si;
+    auto serverInfoCb = [](pa_context*, const pa_server_info* info, void* ud) {
+        auto* s = (ServerInfo*)ud;
+        if (info && info->server_name) s->name = info->server_name;
+        s->done = true;
+    };
+    op = pa_context_get_server_info(pa.ctx, serverInfoCb, &si);
+    if (op) { while (!si.done) pa.iterateBlock(); pa_operation_unref(op); }
+
+    bool isPipeWire = (si.name.find("PipeWire") != std::string::npos) ||
+                      (si.name.find("pipewire") != std::string::npos);
+
+    // ── Step 2: Create a null sink for recording ──────────
     ModuleLoadResult nullRes;
     op = pa_context_load_module(pa.ctx, "module-null-sink",
         "sink_name=HavenCapture "
@@ -267,9 +285,7 @@ void PulseCapture::captureLoop() {
     if (nullRes.index == PA_INVALID_INDEX) { m_running = false; return; }
     m_nullSinkModule = nullRes.index;
 
-    // ── Step 3: Move the target sink input to null sink ───
-    // We need the actual sink index of "HavenCapture"; look it up
-    // The null sink module creates a sink; find it by name
+    // ── Look up the null sink index ───────────────────────
     struct SinkLookup { uint32_t idx = PA_INVALID_INDEX; bool done = false; };
     SinkLookup sl;
 
@@ -294,21 +310,77 @@ void PulseCapture::captureLoop() {
         return;
     }
 
-    // Move sink input
-    {
-        OpDone od;
-        op = pa_context_move_sink_input_by_index(pa.ctx, targetSinkInput, sl.idx, successCb, &od);
-        if (op) { while (!od.done) pa.iterateBlock(); pa_operation_unref(op); }
-    }
+    // ── Look up the original sink name (needed for combine-sink) ──
+    struct SinkNameLookup { std::string name; bool done = false; };
+    SinkNameLookup origSinkLookup;
+    auto sinkNameCb = [](pa_context*, const pa_sink_info* info, int eol, void* ud) {
+        auto* s = (SinkNameLookup*)ud;
+        if (eol > 0 || !info) { s->done = true; return; }
+        if (info->name) s->name = info->name;
+    };
 
-    // ── Step 4: Loopback null sink → default output ───────
-    // So the user still hears the app
-    {
-        ModuleLoadResult lbRes;
-        std::string args = "source=HavenCapture.monitor sink_dont_move=true";
-        op = pa_context_load_module(pa.ctx, "module-loopback", args.c_str(), moduleLoadCb, &lbRes);
-        if (op) { while (!lbRes.done) pa.iterateBlock(); pa_operation_unref(op); }
-        m_loopbackModule = lbRes.index;
+    op = pa_context_get_sink_info_by_index(pa.ctx, originalSink, sinkNameCb, &origSinkLookup);
+    if (op) { while (!origSinkLookup.done) pa.iterateBlock(); pa_operation_unref(op); }
+
+    // ── Step 3: Route audio ───────────────────────────────
+    //
+    // PipeWire path: create a combine-sink that sends audio to
+    // both the original output AND our null sink. Then gently
+    // move the app to the combined sink. The app never loses
+    // its audio output so Chromium/etc. stay stable.
+    //
+    // PulseAudio path: move the app to the null sink directly
+    // (the old approach) and use a loopback for monitoring.
+    //
+    if (isPipeWire && !origSinkLookup.name.empty()) {
+        // Create a combine-sink: original output + HavenCapture
+        std::string combineArgs = "sink_name=HavenCombined "
+            "sink_properties=device.description=\"Haven\\ Combined\\ Capture\" "
+            "slaves=" + origSinkLookup.name + ",HavenCapture";
+
+        ModuleLoadResult combRes;
+        op = pa_context_load_module(pa.ctx, "module-combine-sink",
+            combineArgs.c_str(), moduleLoadCb, &combRes);
+        if (op) { while (!combRes.done) pa.iterateBlock(); pa_operation_unref(op); }
+
+        // m_loopbackModule repurposed to store the combine-sink module ID
+        m_loopbackModule = combRes.index;
+
+        // Look up HavenCombined sink index
+        SinkLookup csl;
+        auto combineSinkCb = [](pa_context*, const pa_sink_info* info, int eol, void* ud) {
+            auto* s = (SinkLookup*)ud;
+            if (eol > 0 || !info) { s->done = true; return; }
+            if (info->name && std::string(info->name) == "HavenCombined") {
+                s->idx = info->index;
+            }
+        };
+        op = pa_context_get_sink_info_by_name(pa.ctx, "HavenCombined", combineSinkCb, &csl);
+        if (op) { while (!csl.done) pa.iterateBlock(); pa_operation_unref(op); }
+
+        if (csl.idx != PA_INVALID_INDEX) {
+            // Small delay to let PipeWire finish setting up the combined sink
+            usleep(150000);
+            OpDone od;
+            op = pa_context_move_sink_input_by_index(pa.ctx, targetSinkInput, csl.idx, successCb, &od);
+            if (op) { while (!od.done) pa.iterateBlock(); pa_operation_unref(op); }
+        }
+    } else {
+        // Classic PulseAudio: move sink input to null sink directly
+        {
+            OpDone od;
+            op = pa_context_move_sink_input_by_index(pa.ctx, targetSinkInput, sl.idx, successCb, &od);
+            if (op) { while (!od.done) pa.iterateBlock(); pa_operation_unref(op); }
+        }
+
+        // Loopback null sink → default output so user still hears the app
+        {
+            ModuleLoadResult lbRes;
+            std::string args = "source=HavenCapture.monitor sink_dont_move=true";
+            op = pa_context_load_module(pa.ctx, "module-loopback", args.c_str(), moduleLoadCb, &lbRes);
+            if (op) { while (!lbRes.done) pa.iterateBlock(); pa_operation_unref(op); }
+            m_loopbackModule = lbRes.index;
+        }
     }
 
     // ── Step 5: Record from the null sink's monitor ───────

@@ -1,6 +1,6 @@
 {
   "name": "haven-desktop",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Haven Desktop — Private chat, reimagined for your desktop",
   "main": "src/main/main.js",
   "author": {
@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "electron-store": "^8.2.0",
+    "electron-updater": "^6.3.9",
     "node-addon-api": "^8.3.0"
   },
   "devDependencies": {

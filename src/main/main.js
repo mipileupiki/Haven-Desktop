@@ -4,13 +4,18 @@
 
 const {
   app, BrowserWindow, BrowserView, ipcMain, Notification, Tray, Menu,
-  nativeImage, desktopCapturer, session, dialog, shell
+  nativeImage, desktopCapturer, session, dialog, shell, screen
 } = require('electron');
 const path  = require('path');
 const fs    = require('fs');
+const os    = require('os');
 const Store = require('electron-store');
 const { ServerManager }      = require('./server-manager');
 const { AudioCaptureManager } = require('./audio-capture');
+
+// ── Auto-Updater (electron-updater) ───────────────────────
+let autoUpdater;
+try { ({ autoUpdater } = require('electron-updater')); } catch {}
 
 // ── Constants ─────────────────────────────────────────────
 // ── Enable native Wayland support (must be before app.whenReady) ──
@@ -80,6 +85,20 @@ app.whenReady().then(async () => {
   serverManager = new ServerManager(store, { showConsole: SHOW_SERVER || IS_DEV });
   audioCapture  = new AudioCaptureManager();
   badgeIcon     = createBadgeIcon();
+
+  // ── Auto-update check (issue #3) ──────────────────────
+  if (autoUpdater) {
+    autoUpdater.autoDownload = false;
+    autoUpdater.on('update-available', (info) => {
+      const wc = getActiveContents() || welcomeWindow?.webContents;
+      if (wc && !wc.isDestroyed()) wc.send('update:available', { version: info.version });
+      new Notification({ title: 'Haven Desktop Update', body: `v${info.version} is available — visit GitHub to download.`, icon: ICON_PATH }).show();
+    });
+    autoUpdater.checkForUpdates().catch(() => {});
+  }
+
+  // ── Linux desktop integration (issue #3) ──────────────
+  if (process.platform === 'linux') installLinuxDesktopEntry();
 
   // Forward server log lines to whichever renderer window is active
   serverManager.onLog((msg) => {
@@ -217,6 +236,16 @@ function switchToServer(serverUrl) {
 
     view.webContents.loadURL(url + '/app.html');
 
+    // ── Open external links in default browser (issue #5) ──
+    view.webContents.on('will-navigate', (event, navUrl) => {
+      try {
+        if (new URL(navUrl).origin !== new URL(url).origin) {
+          event.preventDefault();
+          shell.openExternal(navUrl);
+        }
+      } catch {}
+    });
+
     // Intercept window.open → switch servers or open external
     view.webContents.setWindowOpenHandler(({ url: openUrl }) => {
       handleWindowOpen(openUrl);
@@ -235,7 +264,8 @@ function switchToServer(serverUrl) {
 function handleWindowOpen(url) {
   try {
     const parsed = new URL(url);
-    if (/^https?:$/.test(parsed.protocol)) {
+    // Only switch to the server view if this origin is already a known server
+    if (/^https?:$/.test(parsed.protocol) && serverViews.has(parsed.origin)) {
       switchToServer(parsed.origin);
       return;
     }
@@ -286,11 +316,14 @@ function createTray() {
   let icon;
   try {
     const raw = nativeImage.createFromPath(ICON_PATH);
-    // Use platform-appropriate tray icon sizes to avoid blank/invisible icons on high DPI
+    // DPI-aware tray icon sizing (issue #4)
+    const sf = screen.getPrimaryDisplay().scaleFactor || 1;
     if (process.platform === 'win32') {
-      icon = raw.resize({ width: 24, height: 24 });
+      const s = Math.round(16 * sf);
+      icon = raw.resize({ width: s, height: s });
     } else if (process.platform === 'linux') {
-      icon = raw.resize({ width: 48, height: 48 });
+      const s = Math.round(24 * sf);
+      icon = raw.resize({ width: s, height: s });
     } else {
       icon = raw.resize({ width: 22, height: 22 }); // macOS template size
     }
@@ -511,4 +544,117 @@ function registerIPC() {
       shell.openExternal(url);
     }
   });
+
+  // ── JavaScript dialog overrides for BrowserView (issue #6) ──
+
+  ipcMain.on('dialog:alert', (event, { message }) => {
+    dialog.showMessageBoxSync(mainWindow, {
+      type: 'info', buttons: ['OK'], title: 'Haven',
+      message: String(message || ''),
+    });
+    event.returnValue = true;
+  });
+
+  ipcMain.on('dialog:confirm', (event, { message }) => {
+    const r = dialog.showMessageBoxSync(mainWindow, {
+      type: 'question', buttons: ['Cancel', 'OK'],
+      defaultId: 1, cancelId: 0, title: 'Haven',
+      message: String(message || ''),
+    });
+    event.returnValue = r === 1;
+  });
+
+  ipcMain.on('dialog:prompt', (event, { message, defaultValue }) => {
+    // BrowserView doesn't natively support window.prompt().
+    // Use OS-native dialogs via child_process for a synchronous result.
+    const { execSync } = require('child_process');
+    try {
+      if (process.platform === 'win32') {
+        // VBScript InputBox can distinguish Cancel (Empty) from OK-with-empty-string.
+        const esc = (s) => String(s || '').replace(/"/g, '""');
+        const tmpVbs = path.join(os.tmpdir(), `haven-prompt-${Date.now()}.vbs`);
+        const vbs = [
+          `Dim r`,
+          `r = InputBox("${esc(message)}", "Haven", "${esc(defaultValue)}")`,
+          `If IsEmpty(r) Then`,
+          `  WScript.Quit 1`,
+          `Else`,
+          `  WScript.StdOut.Write r`,
+          `  WScript.Quit 0`,
+          `End If`,
+        ].join('\r\n');
+        fs.writeFileSync(tmpVbs, vbs);
+        try {
+          const result = execSync(`cscript //Nologo "${tmpVbs}"`, {
+            encoding: 'utf-8', timeout: 300000,
+          });
+          try { fs.unlinkSync(tmpVbs); } catch {}
+          event.returnValue = result;
+        } catch {
+          try { fs.unlinkSync(tmpVbs); } catch {}
+          event.returnValue = null; // Cancel pressed
+        }
+      } else {
+        // Linux: zenity (exit 1 = cancel, exit 0 = OK)
+        const esc = (s) => String(s || '').replace(/"/g, '\\"');
+        const result = execSync(
+          `zenity --entry --title="Haven" --text="${esc(message)}" --entry-text="${esc(defaultValue)}" 2>/dev/null`,
+          { encoding: 'utf-8', timeout: 300000 }
+        ).replace(/\r?\n$/, '');
+        event.returnValue = result;
+      }
+    } catch {
+      event.returnValue = null;
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════════
+// Linux Desktop Integration (issue #3)
+//
+// When running as an AppImage, install a .desktop entry and
+// icon so Haven appears in the application launcher.
+// ═══════════════════════════════════════════════════════════
+
+function installLinuxDesktopEntry() {
+  const appImagePath = process.env.APPIMAGE;
+  if (!appImagePath) return; // Only for AppImage installs
+
+  const home = process.env.HOME || os.homedir();
+  const appsDir = path.join(home, '.local', 'share', 'applications');
+  const iconDir = path.join(home, '.local', 'share', 'icons');
+  const desktopFile = path.join(appsDir, 'haven-desktop.desktop');
+  const iconDest = path.join(iconDir, 'haven-desktop.png');
+
+  // Skip if already registered for this AppImage path
+  if (fs.existsSync(desktopFile)) {
+    try {
+      if (fs.readFileSync(desktopFile, 'utf-8').includes(appImagePath)) return;
+    } catch {}
+  }
+
+  try {
+    fs.mkdirSync(appsDir, { recursive: true });
+    fs.mkdirSync(iconDir, { recursive: true });
+
+    if (fs.existsSync(ICON_PATH)) fs.copyFileSync(ICON_PATH, iconDest);
+
+    const entry = [
+      '[Desktop Entry]',
+      'Name=Haven',
+      'Comment=Private self-hosted chat',
+      `Exec="${appImagePath}" %U`,
+      `Icon=${iconDest}`,
+      'Type=Application',
+      'Categories=Network;Chat;InstantMessaging;',
+      'Terminal=false',
+      'StartupWMClass=haven',
+    ].join('\n');
+
+    fs.writeFileSync(desktopFile, entry);
+    try { require('child_process').execSync(`update-desktop-database "${appsDir}" 2>/dev/null`, { timeout: 5000 }); } catch {}
+    console.log('[Haven Desktop] Installed desktop entry:', desktopFile);
+  } catch (err) {
+    console.warn('[Haven Desktop] Desktop integration failed:', err.message);
+  }
 }

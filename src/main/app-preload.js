@@ -13,6 +13,29 @@
 
 const { ipcRenderer } = require('electron');
 
+// ═══════════════════════════════════════════════════════════
+// JavaScript Dialog Overrides for BrowserView (issue #6)
+//
+// Electron's BrowserView doesn't natively support prompt(),
+// confirm(), or alert(). Override them with IPC calls to the
+// main process which shows OS-native dialogs.
+// ═══════════════════════════════════════════════════════════
+
+window.prompt = (message, defaultValue) => {
+  return ipcRenderer.sendSync('dialog:prompt', {
+    message: message || '',
+    defaultValue: defaultValue || '',
+  });
+};
+
+window.confirm = (message) => {
+  return ipcRenderer.sendSync('dialog:confirm', { message: message || '' });
+};
+
+window.alert = (message) => {
+  ipcRenderer.sendSync('dialog:alert', { message: message || '' });
+};
+
 // ─── Internal state ──────────────────────────────────────
 let _audioWorkletNode    = null;
 let _audioCtx            = null;
