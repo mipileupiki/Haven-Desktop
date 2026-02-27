@@ -6,6 +6,7 @@ publish:
   - provider: github
     owner: ancsemi
     repo: Haven-Desktop
+    releaseType: release
 
 directories:
   output: dist
