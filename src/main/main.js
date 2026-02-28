@@ -369,12 +369,14 @@ function createBadgeIcon() {
 function setNotificationBadge() {
   if (!mainWindow) return;
   if (process.platform === 'win32' && badgeIcon) mainWindow.setOverlayIcon(badgeIcon, 'New messages');
+  if (process.platform === 'darwin' || process.platform === 'linux') app.setBadgeCount(1);
   mainWindow.flashFrame(true);
 }
 
 function clearNotificationBadge() {
   if (!mainWindow) return;
   if (process.platform === 'win32') mainWindow.setOverlayIcon(null, '');
+  if (process.platform === 'darwin' || process.platform === 'linux') app.setBadgeCount(0);
   mainWindow.flashFrame(false);
 }
 
@@ -491,10 +493,12 @@ function registerScreenShareHandler() {
         }
       }
 
-      // When per-app audio is active, do NOT pass system loopback —
-      // the per-app track from the native addon is the only audio source.
-      // This prevents all system audio from leaking through.
+      // Per-app audio: stream from native addon only (no loopback).
+      // No audio: user explicitly chose silence.
+      // System audio: use loopback (default).
       if (usePerAppAudio) {
+        callback({ video: selected });
+      } else if (result.audioAppPid === 'none') {
         callback({ video: selected });
       } else {
         callback({ video: selected, audio: 'loopback' });
@@ -591,6 +595,16 @@ function registerIPC() {
     // Taskbar notification badge when window is not focused
     if (mainWindow && !mainWindow.isFocused()) setNotificationBadge();
     return true;
+  });
+
+  // ── Unread badge signal (fired by renderer on any unread count change) ──
+  // Works even when native push notifications are unavailable (VPN/LAN setups).
+  ipcMain.on('notification-badge', (_e, hasUnread) => {
+    if (hasUnread) {
+      if (mainWindow && !mainWindow.isFocused()) setNotificationBadge();
+    } else {
+      clearNotificationBadge();
+    }
   });
 
   // ── Window Controls ───────────────────────────────────

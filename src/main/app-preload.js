@@ -36,6 +36,14 @@ window.alert = (message) => {
   ipcRenderer.sendSync('dialog:alert', { message: message || '' });
 };
 
+// ─── Clear any stale voice-channel state on fresh page load ──────────────
+// Without this, closing the app while in voice leaves haven_voice_channel in
+// localStorage, causing the web app to think the user is already in voice on
+// the next launch, which prevents rejoining until they manually "leave" first.
+window.addEventListener('DOMContentLoaded', () => {
+  try { localStorage.removeItem('haven_voice_channel'); } catch {}
+});
+
 // ─── Internal state ──────────────────────────────────────
 let _audioWorkletNode    = null;
 let _audioCtx            = null;
@@ -83,10 +91,11 @@ function showScreenPicker(sources, audioApps) {
         font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
       }
       .hsp-box{background:#1a1a2e;border-radius:14px;padding:28px;max-width:820px;width:92%;
-        max-height:82vh;overflow-y:auto;border:1px solid rgba(107,79,219,.3);
+        max-height:82vh;display:flex;flex-direction:column;border:1px solid rgba(107,79,219,.3);
         box-shadow:0 20px 60px rgba(0,0,0,.5);}
-      .hsp-title{color:#e0e0e0;font-size:20px;font-weight:700;margin-bottom:2px}
-      .hsp-sub{color:#888;font-size:13px;margin-bottom:18px}
+      .hsp-title{color:#e0e0e0;font-size:20px;font-weight:700;margin-bottom:2px;flex-shrink:0}
+      .hsp-sub{color:#888;font-size:13px;margin-bottom:14px;flex-shrink:0}
+      .hsp-scroll{flex:1;overflow-y:auto;padding-right:4px;margin-right:-4px;min-height:0}
       .hsp-sec{margin-bottom:14px}
       .hsp-sec-title{color:#aaa;font-size:11px;text-transform:uppercase;letter-spacing:1.2px;
         margin-bottom:8px;font-weight:700}
@@ -99,7 +108,7 @@ function showScreenPicker(sources, audioApps) {
         object-fit:cover;background:#0d0d1a}
       .hsp-src-name{color:#ccc;font-size:12px;text-align:center;white-space:nowrap;
         overflow:hidden;text-overflow:ellipsis}
-      .hsp-audio{margin-top:16px;padding-top:16px;border-top:1px solid #2a2a4a}
+      .hsp-audio{padding-top:14px;border-top:1px solid #2a2a4a;flex-shrink:0;margin-top:10px}
       .hsp-apps{display:flex;flex-wrap:wrap;gap:8px}
       .hsp-app{background:#16213e;border-radius:6px;padding:8px 14px;cursor:pointer;
         border:2px solid transparent;transition:border-color .2s;display:flex;
@@ -107,7 +116,7 @@ function showScreenPicker(sources, audioApps) {
       .hsp-app:hover{border-color:rgba(107,79,219,.5)}
       .hsp-app.sel{border-color:#6b4fdb}
       .hsp-app .ico{width:20px;height:20px}
-      .hsp-btns{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}
+      .hsp-btns{display:flex;justify-content:flex-end;gap:10px;margin-top:16px;flex-shrink:0}
       .hsp-btn{padding:8px 22px;border-radius:6px;border:none;font-size:14px;cursor:pointer;font-weight:600}
       .hsp-cancel{background:#333;color:#ccc}.hsp-cancel:hover{background:#444}
       .hsp-share{background:#6b4fdb;color:#fff}.hsp-share:hover{background:#7b5fe9}
@@ -119,14 +128,16 @@ function showScreenPicker(sources, audioApps) {
       <div class="hsp-title">Share Your Screen</div>
       <div class="hsp-sub">Choose a window or screen — then optionally pick an application whose audio to share.</div>
 
-      <div class="hsp-sec">
-        <div class="hsp-sec-title">Screens</div>
-        <div class="hsp-grid" id="hsp-screens"></div>
-      </div>
+      <div class="hsp-scroll">
+        <div class="hsp-sec">
+          <div class="hsp-sec-title">Screens</div>
+          <div class="hsp-grid" id="hsp-screens"></div>
+        </div>
 
-      <div class="hsp-sec">
-        <div class="hsp-sec-title">Application Windows</div>
-        <div class="hsp-grid" id="hsp-windows"></div>
+        <div class="hsp-sec">
+          <div class="hsp-sec-title">Application Windows</div>
+          <div class="hsp-grid" id="hsp-windows"></div>
+        </div>
       </div>
 
       <div class="hsp-audio">
@@ -165,18 +176,30 @@ function showScreenPicker(sources, audioApps) {
   });
 
   // ── Populate audio applications ────────────────────────
-  if (audioApps && audioApps.length) {
-    // "No App Audio" default
-    const noEl = document.createElement('div');
-    noEl.className = 'hsp-app sel';
-    noEl.innerHTML = '🔇&nbsp; System Audio Only';
-    noEl.onclick = () => {
-      appsEl.querySelectorAll('.sel').forEach(a => a.classList.remove('sel'));
-      noEl.classList.add('sel');
-      selAudioPid = null;
-    };
-    appsEl.appendChild(noEl);
+  // "No Audio" option — always shown first
+  const muteEl = document.createElement('div');
+  muteEl.className = 'hsp-app';
+  muteEl.innerHTML = '🔇&nbsp; No Audio';
+  muteEl.onclick = () => {
+    appsEl.querySelectorAll('.sel').forEach(a => a.classList.remove('sel'));
+    muteEl.classList.add('sel');
+    selAudioPid = 'none';
+  };
+  appsEl.appendChild(muteEl);
 
+  // "System Audio" option — always shown, selected by default
+  const sysEl = document.createElement('div');
+  sysEl.className = 'hsp-app sel';
+  sysEl.innerHTML = '🔊&nbsp; System Audio';
+  sysEl.onclick = () => {
+    appsEl.querySelectorAll('.sel').forEach(a => a.classList.remove('sel'));
+    sysEl.classList.add('sel');
+    selAudioPid = null;
+  };
+  appsEl.appendChild(sysEl);
+
+  // Per-app entries when native module is available
+  if (audioApps && audioApps.length) {
     audioApps.forEach(a => {
       const el = document.createElement('div');
       el.className = 'hsp-app';
@@ -189,8 +212,6 @@ function showScreenPicker(sources, audioApps) {
       };
       appsEl.appendChild(el);
     });
-  } else {
-    appsEl.innerHTML = '<div class="hsp-none">Per-app audio capture is unavailable — system audio will be shared instead. Build the native module to enable this feature.</div>';
   }
 
   // ── Cancel ─────────────────────────────────────────────
@@ -204,7 +225,7 @@ function showScreenPicker(sources, audioApps) {
     // Restore focus to the main window content (prevents Wayland focus loss)
     try { document.body?.focus(); window.focus(); } catch {}
 
-    if (!cancelled && selAudioPid) {
+    if (!cancelled && selAudioPid && selAudioPid !== 'none') {
       _capturedAudioPid = selAudioPid;
       // Build the audio pipeline BEFORE sending the picker result,
       // so the per-app track is ready when getDisplayMedia resolves.
@@ -420,6 +441,9 @@ window.havenDesktop = {
   },
 
   notify: (title, body, opts = {}) => ipcRenderer.invoke('notify', { title, body, ...opts }),
+
+  /** Signal the taskbar/dock badge (no native notification needed) */
+  setUnreadBadge: (hasUnread) => ipcRenderer.send('notification-badge', hasUnread),
 
   settings: {
     get: (key)       => ipcRenderer.invoke('settings:get', key),
