@@ -51,6 +51,7 @@ let serverManager   = null;
 let audioCapture    = null;
 let serverViews     = new Map();  // serverUrl → BrowserView
 let activeServerUrl = null;
+let primaryServerUrl = null;       // the server the user actually chose to connect to
 let badgeIcon       = null;
 
 // ── Single-Instance Lock ──────────────────────────────────
@@ -166,6 +167,7 @@ function resetToWelcome() {
   }
   serverViews.clear();
   activeServerUrl = null;
+  primaryServerUrl = null;
   // Clear saved connection prefs so user isn't soft-locked
   store.set('userPrefs.skipWelcome', false);
   store.set('userPrefs.serverUrl', null);
@@ -238,8 +240,14 @@ function createAppWindow(serverUrl) {
     mainWindow.on('closed', () => {
       serverViews.clear();
       activeServerUrl = null;
+      primaryServerUrl = null;
       mainWindow = null;
     });
+  }
+
+  // Track the user's chosen server so load failures on peer links don't wipe the session
+  if (!primaryServerUrl) {
+    try { primaryServerUrl = new URL(serverUrl).origin; } catch { primaryServerUrl = serverUrl; }
   }
 
   switchToServer(serverUrl);
@@ -295,10 +303,30 @@ function switchToServer(serverUrl) {
       }).catch(() => {});
     }, 15000);
 
-    // ── Handle load failures — send user back to welcome screen ──
+    // ── Handle load failures — only reset to welcome for the primary server ──
     view.webContents.on('did-fail-load', (_e, errorCode, errorDesc) => {
       loadResolved = true;
       console.error(`[Haven Desktop] Failed to load ${url}: ${errorCode} ${errorDesc}`);
+      if (url !== primaryServerUrl) {
+        // A peer/secondary server failed — clean up and return to the primary view silently
+        mainWindow?.removeBrowserView(view);
+        try { view.webContents.destroy(); } catch {}
+        serverViews.delete(url);
+        if (primaryServerUrl && serverViews.has(primaryServerUrl)) {
+          switchToServer(primaryServerUrl);
+          const wc = serverViews.get(primaryServerUrl)?.webContents;
+          if (wc && !wc.isDestroyed()) {
+            wc.executeJavaScript(`
+              if (typeof app !== 'undefined' && typeof app._showToast === 'function') {
+                app._showToast("Couldn't connect to that server", 'error');
+              }
+            `).catch(() => {});
+          }
+        } else {
+          resetToWelcome();
+        }
+        return;
+      }
       resetToWelcome();
     });
 
@@ -331,11 +359,10 @@ function handleWindowOpen(url) {
   try {
     const parsed = new URL(url);
     if (/^https?:$/.test(parsed.protocol)) {
-      // If origin is already loaded OR the path suggests a Haven server,
-      // swap within the app window instead of opening a browser.
-      const isKnown = serverViews.has(parsed.origin);
-      const isAppUrl = parsed.pathname === '/app.html' || parsed.pathname === '/' || parsed.pathname === '';
-      if (isKnown || isAppUrl) {
+      // Only switch within the app for servers already registered in this session.
+      // Unknown external URLs (including friends' Haven servers) open in the system
+      // browser — trying to auto-load them risks a failed navigation that resets the session.
+      if (serverViews.has(parsed.origin)) {
         switchToServer(parsed.origin);
         return;
       }
