@@ -92,6 +92,26 @@ app.on('certificate-error', (event, webContents, url, error, certificate, callba
 });
 
 // ═══════════════════════════════════════════════════════════
+// Session-Level Certificate Bypass
+//
+// The 'certificate-error' event above only fires for navigation
+// (page loads).  WebSocket, fetch, and XHR connections go through
+// Chromium's network stack directly, where self-signed cert
+// failures flood ssl_client_socket_impl with rapid-fire errors.
+// Each error allocates renderer-heap objects; in a Socket.IO
+// reconnection storm the renderer OOMs and the screen goes blank.
+//
+// setCertificateVerifyProc handles ALL connections — navigation
+// *and* sub-resources — at a level above the C++ TLS code, so
+// the handshake never fails and no error objects accumulate.
+// ═══════════════════════════════════════════════════════════
+app.on('ready', () => {
+  session.defaultSession.setCertificateVerifyProc((_request, callback) => {
+    callback(0); // 0 = chromium net::OK — accept the certificate
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
 // App Lifecycle
 // ═══════════════════════════════════════════════════════════
 
@@ -411,13 +431,26 @@ function switchToServer(serverUrl) {
     // ── Auto-recover from renderer crashes ──
     // When the BrowserView's renderer dies the screen goes blank with no
     // automatic recovery.  Re-load the page after a short pause.
+    // Limit retries with exponential back-off to prevent infinite
+    // crash → reload → crash loops (e.g. during sustained SSL storms).
+    let _crashCount = 0;
+    const MAX_CRASH_RETRIES = 3;
+    const CRASH_WINDOW_MS  = 60000; // reset counter after 1 min of stability
     view.webContents.on('render-process-gone', (_e, details) => {
       if (details.reason === 'clean-exit') return;
-      console.warn(`[Haven Desktop] Renderer crashed (${details.reason}) for ${url}, reloading…`);
+      _crashCount++;
+      console.warn(`[Haven Desktop] Renderer crashed (${details.reason}) for ${url} [${_crashCount}/${MAX_CRASH_RETRIES}], reloading…`);
+      if (_crashCount > MAX_CRASH_RETRIES) {
+        console.error(`[Haven Desktop] Renderer crashed ${_crashCount} times — giving up. Use Ctrl+Shift+Home to reset.`);
+        return;
+      }
+      const delay = 1500 * Math.pow(2, _crashCount - 1); // 1.5 s, 3 s, 6 s
       setTimeout(() => {
         if (!mainWindow || !serverViews.has(url)) return;
         try { view.webContents.loadURL(url + '/app.html'); } catch {}
-      }, 1500);
+      }, delay);
+      // Reset counter after a period of stability
+      setTimeout(() => { if (_crashCount <= MAX_CRASH_RETRIES) _crashCount = 0; }, CRASH_WINDOW_MS);
     });
 
     // Only open DevTools for the first server view in dev mode

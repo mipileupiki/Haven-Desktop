@@ -1,5 +1,13 @@
 # Haven Desktop Changelog
 
+## v1.1.0
+
+### Bug Fixes
+- **SSL error flood causing blank screen + OOM crash** — when connecting to a Haven server over HTTPS with a self-signed certificate, the existing `certificate-error` handler only covered page navigation. WebSocket reconnection attempts (Socket.IO) and fetch/XHR requests still hit Chromium's native `ssl_client_socket_impl` layer, which rejected the cert and logged an error object for every single failed handshake. During reconnection storms, thousands of these errors accumulated in the renderer's heap until Oilpan's garbage collector couldn't allocate, causing a fatal OOM crash and a blank screen. Fix: `setCertificateVerifyProc` on the default session now accepts all certificates at the session level, which covers *all* connection types (navigation, WebSocket, fetch, XHR) before the C++ TLS code ever sees a failure. The SSL error flood no longer occurs, so the renderer never OOMs.
+- **Infinite crash-reload loop** — the v1.0.9 `render-process-gone` handler would reload the page unconditionally on every crash, creating an infinite crash → reload → crash cycle if the underlying cause persisted. Crash recovery now has a retry limit of 3 with exponential back-off (1.5 s → 3 s → 6 s), and resets the counter after 60 seconds of stability.
+
+---
+
 ## v1.0.9
 
 ### Added
